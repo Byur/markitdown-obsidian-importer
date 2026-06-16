@@ -1,0 +1,95 @@
+# MarkItDown Importer for Obsidian
+
+Current release version: `1.0.0`
+
+## 简介 / Overview
+
+这是一个跨平台、仅支持桌面端的 Obsidian 插件，用于把文件、文件夹、压缩包、图片、音频、网页和 YouTube 链接导入当前仓库，并转换为 Markdown 笔记。
+
+This is a cross-platform, desktop-only Obsidian plugin for importing files, folders, archives, images, audio, web pages, and YouTube links into the current vault as Markdown notes.
+
+## 使用方法 / Usage
+
+1. 在 Obsidian 社区插件中启用 `MarkItDown Importer`。
+2. 打开插件设置页，使用 `环境工具` 检查或安装本地 Python 环境。
+3. 点击左侧上传图标，或在命令面板运行 `打开 MarkItDown 导入器`。
+4. 选择或输入写入目录。
+5. 将文件/文件夹拖入上传区域，点击选择文件/文件夹，或把 URL 粘贴到链接输入框。
+
+1. Enable `MarkItDown Importer` in Obsidian community plugins.
+2. Open the plugin settings and use `环境工具` to check or install the local Python environment.
+3. Click the upload ribbon icon or run `打开 MarkItDown 导入器` from the command palette.
+4. Pick or type the destination folder.
+5. Drag files/folders into the drop area, choose a file/folder, or paste URLs into the URL box.
+
+你也可以把受支持的文件、文件夹或 URL 直接拖到 Markdown 编辑器中。插件会自动转换，并在当前光标位置插入 wiki 链接。
+
+You can also drag a supported file, folder, or URL directly into the Markdown editor. The plugin converts it and inserts a wiki link at the cursor.
+
+## 支持的来源 / Supported Sources
+
+- PDF
+- Word：`.doc`、`.docx`
+- PowerPoint：`.ppt`、`.pptx`
+- Excel：`.xls`、`.xlsx`、`.xlsm`
+- 带 OCR 的图片：`.png`、`.jpg`、`.jpeg`、`.tif`、`.tiff`、`.bmp`、`.gif`、`.webp`
+- 音频转录：`.wav`、`.mp3`、`.m4a`、`.flac`、`.ogg`、`.aac`
+- 网页和文本格式：`.html`、`.htm`、`.txt`、`.md`、`.csv`、`.json`、`.xml`、`.rtf`
+- ZIP 压缩包，支持递归转换其中的受支持文件
+- 网页和 YouTube URL
+- 整个文件夹，默认递归处理
+
+- PDF
+- Word: `.doc`, `.docx`
+- PowerPoint: `.ppt`, `.pptx`
+- Excel: `.xls`, `.xlsx`, `.xlsm`
+- Images with OCR: `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.gif`, `.webp`
+- Audio transcription: `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`, `.aac`
+- Web and text formats: `.html`, `.htm`, `.txt`, `.md`, `.csv`, `.json`, `.xml`, `.rtf`
+- ZIP archives with recursive conversion of supported files inside
+- Web pages and YouTube URLs
+- Whole folders, recursively by default
+
+## 环境说明 / Notes
+
+- 插件通过当前仓库里的 Python 环境运行 `converter_bridge.py`。
+- 设置页可以在当前仓库中创建 `.venv`，并安装 `markitdown[all]`。
+- 当前 MarkItDown 包需要 Python 3.10 或更新版本。
+- macOS 图片 OCR 会在可用时通过 `macos_ocr.swift` 使用 Apple Vision。
+- Windows 和 Linux 图片 OCR 可以使用可选的 Tesseract OCR；如果没有安装 Tesseract，图片会退回 MarkItDown 默认处理。
+- 音频转换使用安装在仓库 Python 环境中的 `imageio-ffmpeg`，不需要 Homebrew。
+
+- The plugin runs `converter_bridge.py` with the vault-local Python environment.
+- The settings page can create `.venv` in the current vault and install `markitdown[all]`.
+- Python 3.10 or newer is required for the current MarkItDown package.
+- macOS image OCR uses Apple Vision through `macos_ocr.swift` when available.
+- Windows and Linux image OCR can use optional Tesseract OCR if it is installed on the system. Without Tesseract, image handling falls back to MarkItDown defaults.
+- Audio conversion uses `imageio-ffmpeg` installed into the vault Python environment, so Homebrew is not required.
+
+## 平台安装 / Platform Setup
+
+- macOS：如果系统 Python 太旧，请安装 Python 3.10+。插件会创建 `.venv/bin/python`。
+- Windows：从 Python.org 安装 Python 3.10+，并勾选 `Add python.exe to PATH`；也可以使用 Python Launcher `py`。插件会创建 `.venv\Scripts\python.exe`。
+- Linux：通过发行版包管理器安装 Python 3.10+。插件会创建 `.venv/bin/python`。
+
+- macOS: install Python 3.10+ if the system Python is too old. The plugin can create `.venv/bin/python`.
+- Windows: install Python 3.10+ from Python.org and enable `Add python.exe to PATH`, or use the Python launcher `py`. The plugin creates `.venv\Scripts\python.exe`.
+- Linux: install Python 3.10+ with your distribution package manager. The plugin creates `.venv/bin/python`.
+
+## 设置项 / Settings
+
+- `环境工具`：检查 Python、MarkItDown、桥接脚本、OCR 和 ffmpeg；创建/更新 `.venv`；可选安装 ffmpeg 到仓库 Python 环境。
+- `Python 路径`：用于运行桥接脚本的 Python。
+- `默认写入目录`：相对于当前仓库的目标目录。
+- `递归转换文件夹`：拖入或选择文件夹时，递归处理其中受支持的文件。
+- `拖到编辑器时插入链接`：把来源拖到编辑器中时，转换后插入 wiki 链接。
+- `导入后打开第一篇笔记`：转换完成后打开第一篇导入笔记。
+- `覆盖同名笔记`：覆盖已有同名笔记；关闭时会自动生成带编号的副本。
+
+- `环境工具`: check Python, MarkItDown, bridge scripts, OCR, and ffmpeg; create/update `.venv`; optionally install ffmpeg into the vault Python environment.
+- `Python 路径`: Python used to run the bridge.
+- `默认写入目录`: destination folder relative to the vault.
+- `递归转换文件夹`: convert supported files inside folders recursively.
+- `拖到编辑器时插入链接`: convert editor drops and insert wiki links.
+- `导入后打开第一篇笔记`: open the first imported note after conversion.
+- `覆盖同名笔记`: overwrite existing notes instead of creating numbered copies.
