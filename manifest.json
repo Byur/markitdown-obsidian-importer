@@ -1,9 +1,9 @@
 {
   "id": "markitdown-importer",
   "name": "MarkItDown Importer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.5.0",
-  "description": "Drag files, folders, archives, images, audio, web pages, and YouTube links into Obsidian and import them as Markdown notes.",
+  "description": "Drag files, folders, archives, images, audio, web pages, and YouTube links into your vault as Markdown notes.",
   "author": "Elek",
   "authorUrl": "",
   "isDesktopOnly": true
