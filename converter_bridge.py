@@ -697,6 +697,155 @@ def extract_legacy_ppt(source: Path, tools_dir: Path | None) -> str | None:
             pass
 
 
+def extract_legacy_doc(source: Path) -> tuple[str, str] | None:
+    text = extract_legacy_doc_with_textutil(source)
+    if text:
+        return text, "markitdown + textutil doc fallback"
+
+    text = extract_legacy_doc_with_command(source, "antiword", [str(source)])
+    if text:
+        return text, "markitdown + antiword doc fallback"
+
+    text = extract_legacy_doc_with_command(source, "catdoc", [str(source)])
+    if text:
+        return text, "markitdown + catdoc doc fallback"
+
+    text = extract_legacy_doc_with_libreoffice(source)
+    if text:
+        return text, "markitdown + libreoffice doc fallback"
+
+    text = extract_legacy_doc_text(source)
+    if text:
+        return text, "markitdown + legacy doc fallback"
+
+    return None
+
+
+def extract_legacy_doc_with_textutil(source: Path) -> str | None:
+    if not shutil.which("textutil"):
+        return None
+    try:
+        result = subprocess.run(
+            ["textutil", "-convert", "txt", "-stdout", str(source)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    text = clean_extracted_text(result.stdout)
+    return text or None
+
+
+def extract_legacy_doc_with_command(source: Path, command: str, args: list[str]) -> str | None:
+    if not shutil.which(command):
+        return None
+    try:
+        result = subprocess.run(
+            [command, *args],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    text = clean_extracted_text(result.stdout)
+    return text or None
+
+
+def extract_legacy_doc_with_libreoffice(source: Path) -> str | None:
+    command = shutil.which("soffice") or shutil.which("libreoffice")
+    if not command:
+        return None
+    with tempfile.TemporaryDirectory(prefix="markitdown-doc-") as temp_dir:
+        try:
+            result = subprocess.run(
+                [
+                    command,
+                    "--headless",
+                    "--convert-to",
+                    "txt:Text",
+                    "--outdir",
+                    temp_dir,
+                    str(source),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+        output = Path(temp_dir) / f"{source.stem}.txt"
+        if not output.exists():
+            candidates = sorted(Path(temp_dir).glob("*.txt"))
+            output = candidates[0] if candidates else output
+        if not output.exists():
+            return None
+        text = clean_extracted_text(output.read_text(encoding="utf-8", errors="ignore"))
+        return text or None
+
+
+def extract_legacy_doc_text(source: Path) -> str | None:
+    try:
+        import olefile
+    except Exception:
+        return None
+
+    try:
+        with olefile.OleFileIO(str(source)) as ole:
+            stream_name = next(
+                (
+                    entry
+                    for entry in ole.listdir(streams=True, storages=False)
+                    if entry and entry[-1] == "WordDocument"
+                ),
+                None,
+            )
+            if stream_name is None:
+                return None
+            data = ole.openstream(stream_name).read()
+    except Exception:
+        return None
+
+    chunks: list[str] = []
+    seen: set[str] = set()
+
+    def add_candidate(text: str) -> None:
+        cleaned = clean_extracted_text(text)
+        if not cleaned or cleaned in seen:
+            return
+        if len(re.sub(r"\s+", "", cleaned)) < 8:
+            return
+        seen.add(cleaned)
+        chunks.append(cleaned)
+
+    for match in re.finditer(rb"(?:[\x20-\x7e]\x00|[\x00-\xff][\x4e-\x9f]){8,}", data):
+        add_candidate(match.group(0).decode("utf-16le", errors="ignore"))
+
+    for match in re.finditer(rb"[\x20-\x7e\x80-\xff]{16,}", data):
+        raw = match.group(0)
+        try:
+            add_candidate(raw.decode("gb18030", errors="ignore"))
+        except Exception:
+            pass
+
+    if not chunks:
+        return None
+    return (
+        "> Legacy .doc fallback extraction was used because MarkItDown could not convert this file directly.\n\n"
+        + "\n\n".join(chunks)
+    )
+
+
 def clean_extracted_text(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\x0b", "\n")
     text = re.sub(r"[\x00-\x08\x0c\x0e-\x1f]", "", text)
@@ -838,6 +987,10 @@ def convert_content(source: Path | str, tools_dir: Path | None, ocr_script: Path
         legacy_text = extract_legacy_ppt(path, tools_dir)
         if legacy_text:
             return legacy_text, "markitdown + legacy ppt fallback"
+    if suffix == ".doc":
+        legacy_doc = extract_legacy_doc(path)
+        if legacy_doc:
+            return legacy_doc
     if suffix in IMAGE_EXTENSIONS:
         return convert_image(path, ocr_script)
     return convert_with_markitdown(path), "markitdown"

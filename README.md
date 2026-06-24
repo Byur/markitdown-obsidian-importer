@@ -1,6 +1,6 @@
 # MarkItDown Importer for Obsidian
 
-Current release version: `1.0.4`
+Current release version: `1.0.5`
 
 ## 简介 / Overview
 
