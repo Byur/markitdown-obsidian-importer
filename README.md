@@ -16,15 +16,59 @@ This is a cross-platform, desktop-only Obsidian plugin for importing files, fold
 4. 选择或输入写入目录。
 5. 将文件/文件夹拖入上传区域，点击选择文件/文件夹，或把 URL 粘贴到链接输入框。
 
+仓库维护者也可以把当前版本安装到已有 vault：`./install.sh /path/to/vault`，或设置 `OBSIDIAN_VAULT=/path/to/vault` 后运行 `./install.sh`。脚本会检查目标目录包含 `.obsidian`。
+
 1. Enable `MarkItDown Importer` in Obsidian community plugins.
 2. Open the plugin settings and use `环境工具` to check or install the local Python environment.
 3. Click the upload ribbon icon or run `打开 MarkItDown 导入器` from the command palette.
 4. Pick or type the destination folder.
 5. Drag files/folders into the drop area, choose a file/folder, or paste URLs into the URL box.
 
+To install a local checkout into an existing vault, run `./install.sh /path/to/vault` or set `OBSIDIAN_VAULT=/path/to/vault` before running `./install.sh`. The script checks for the vault's `.obsidian` directory.
+
 你也可以把受支持的文件、文件夹或 URL 直接拖到 Markdown 编辑器中。插件会自动转换，并在当前光标位置插入 wiki 链接。
 
 You can also drag a supported file, folder, or URL directly into the Markdown editor. The plugin converts it and inserts a wiki link at the cursor.
+
+## 命令行 / Command Line
+
+仓库提供 `cli.py`，可在终端复用插件的转换能力。请使用已安装项目依赖的 Python；如果依赖安装在 vault 的 `.venv`，macOS/Linux 示例：
+
+```bash
+"$VAULT/.venv/bin/python" /path/to/markitdown-obsidian-importer/cli.py \
+  document.pdf ./reference https://example.com/article \
+  --vault "$VAULT" \
+  --dest "待整理/导入"
+```
+
+支持文件、文件夹、网页 URL、YouTube URL 和 Bilibili URL。默认 vault 是当前工作目录，默认输出目录是 `00_Inbox/Imports`，文件夹默认递归处理；同名笔记默认生成带编号的副本。
+
+```bash
+python3 cli.py --help
+python3 cli.py document.pdf --vault /path/to/vault --json
+python3 cli.py ./documents --vault /path/to/vault --no-recursive --overwrite
+```
+
+`--json` 输出可供脚本处理的结构化结果；有任一来源转换失败时，命令返回非零退出码。
+
+The repository includes `cli.py` to run the plugin's conversion features from a terminal. Use a Python interpreter where the project dependencies are installed. If they are installed in the vault's `.venv`, on macOS/Linux run:
+
+```bash
+"$VAULT/.venv/bin/python" /path/to/markitdown-obsidian-importer/cli.py \
+  document.pdf ./reference https://example.com/article \
+  --vault "$VAULT" \
+  --dest "待整理/导入"
+```
+
+The CLI accepts files, folders, web page URLs, YouTube URLs, and Bilibili URLs. The current directory is the default vault, `00_Inbox/Imports` is the default destination, and folders are processed recursively by default. Existing notes are preserved by creating numbered copies.
+
+```bash
+python3 cli.py --help
+python3 cli.py document.pdf --vault /path/to/vault --json
+python3 cli.py ./documents --vault /path/to/vault --no-recursive --overwrite
+```
+
+`--json` prints structured results for scripts. The command exits with a non-zero status if any source fails to convert.
 
 ## 支持的来源 / Supported Sources
 

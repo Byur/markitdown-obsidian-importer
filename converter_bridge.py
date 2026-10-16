@@ -680,21 +680,8 @@ def convert_youtube_url(url: str) -> tuple[str, str, str]:
         return body, "youtube metadata + transcript error", safe_note_name(title)
 
 
-def extract_legacy_ppt(source: Path, tools_dir: Path | None) -> str | None:
-    if not tools_dir:
-        return extract_legacy_ppt_text(source)
-    sys.path.insert(0, str(tools_dir))
-    try:
-        from markitdown_to_obsidian import convert_file
-
-        return convert_file(source)
-    except Exception:
-        return extract_legacy_ppt_text(source)
-    finally:
-        try:
-            sys.path.remove(str(tools_dir))
-        except ValueError:
-            pass
+def extract_legacy_ppt(source: Path) -> str | None:
+    return extract_legacy_ppt_text(source)
 
 
 def extract_legacy_doc(source: Path) -> tuple[str, str] | None:
@@ -977,14 +964,14 @@ def convert_image(source: Path, ocr_script: Path) -> tuple[str, str]:
     return convert_with_markitdown(source), "markitdown"
 
 
-def convert_content(source: Path | str, tools_dir: Path | None, ocr_script: Path) -> tuple[str, str]:
+def convert_content(source: Path | str, ocr_script: Path) -> tuple[str, str]:
     if isinstance(source, str) and is_url(source):
         return convert_with_markitdown(source), "markitdown"
 
     path = Path(source)
     suffix = path.suffix.lower()
     if suffix == ".ppt":
-        legacy_text = extract_legacy_ppt(path, tools_dir)
+        legacy_text = extract_legacy_ppt(path)
         if legacy_text:
             return legacy_text, "markitdown + legacy ppt fallback"
     if suffix == ".doc":
@@ -1013,7 +1000,7 @@ def write_note(
     return output
 
 
-def convert_zip(source: Path, tools_dir: Path | None, ocr_script: Path) -> tuple[str, str]:
+def convert_zip(source: Path, ocr_script: Path) -> tuple[str, str]:
     sections: list[str] = []
     with tempfile.TemporaryDirectory(prefix="markitdown-zip-") as temp_dir:
         temp_root = Path(temp_dir)
@@ -1023,7 +1010,7 @@ def convert_zip(source: Path, tools_dir: Path | None, ocr_script: Path) -> tuple
             if not child.is_file() or child.suffix.lower() not in SUPPORTED_EXTENSIONS - ZIP_EXTENSIONS:
                 continue
             try:
-                markdown, converter = convert_content(child, tools_dir, ocr_script)
+                markdown, converter = convert_content(child, ocr_script)
                 relative = child.relative_to(temp_root).as_posix()
                 sections.append(f"## {relative}\n\n{markdown}\n\n<!-- converter: {converter} -->")
             except Exception as exc:
@@ -1048,7 +1035,6 @@ def convert_one(
     output_dir: Path,
     overwrite: bool,
     recursive: bool,
-    tools_dir: Path | None,
     ocr_script: Path,
 ) -> list[dict[str, object]]:
     if is_url(source):
@@ -1059,7 +1045,7 @@ def convert_one(
             markdown, converter, stem = convert_bilibili_url(source)
             output = write_note(source, markdown, output_dir, overwrite, converter, stem)
         else:
-            markdown, converter = convert_content(source, tools_dir, ocr_script)
+            markdown, converter = convert_content(source, ocr_script)
             output = write_note(source, markdown, output_dir, overwrite, converter)
         return [{"ok": True, "source": source, "output": str(output)}]
 
@@ -1070,7 +1056,7 @@ def convert_one(
         if not files:
             return [{"ok": False, "source": str(path), "error": "No supported files found in this folder."}]
         for child in files:
-            results.extend(convert_one(str(child), output_dir, overwrite, recursive, tools_dir, ocr_script))
+            results.extend(convert_one(str(child), output_dir, overwrite, recursive, ocr_script))
         return results
 
     if not path.is_file():
@@ -1080,9 +1066,9 @@ def convert_one(
         return [{"ok": False, "source": str(path), "error": f"Unsupported file type: {path.suffix or 'none'}"}]
 
     if path.suffix.lower() in ZIP_EXTENSIONS:
-        markdown, converter = convert_zip(path, tools_dir, ocr_script)
+        markdown, converter = convert_zip(path, ocr_script)
     else:
-        markdown, converter = convert_content(path, tools_dir, ocr_script)
+        markdown, converter = convert_content(path, ocr_script)
     output = write_note(path, markdown, output_dir, overwrite, converter)
     return [{"ok": True, "source": str(path), "output": str(output)}]
 
@@ -1094,7 +1080,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--recursive", action="store_true")
-    parser.add_argument("--tools-dir", type=Path, default=None)
     parser.add_argument("--ocr-script", type=Path, required=True)
     parser.add_argument("--result-file", type=Path, default=None)
     return parser.parse_args()
@@ -1134,7 +1119,6 @@ def main() -> int:
                     output_dir,
                     args.overwrite,
                     args.recursive,
-                    args.tools_dir.expanduser().resolve() if args.tools_dir else None,
                     args.ocr_script.expanduser().resolve(),
                 )
             )
