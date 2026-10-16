@@ -44,12 +44,52 @@ You can also drag a supported file, folder, or URL directly into the Markdown ed
 支持文件、文件夹、网页 URL、YouTube URL 和 Bilibili URL。默认 vault 是当前工作目录，默认输出目录是 `00_Inbox/Imports`，文件夹默认递归处理；同名笔记默认生成带编号的副本。
 
 ```bash
+VAULT="/path/to/your/Obsidian vault"
+
 python3 cli.py --help
+python3 cli.py env --help
+python3 cli.py env check --vault "$VAULT"
+python3 cli.py env install --vault "$VAULT"
 python3 cli.py document.pdf --vault /path/to/vault --json
 python3 cli.py ./documents --vault /path/to/vault --no-recursive --overwrite
 ```
 
+### 转换命令参数
+
+| 参数 | 作用 |
+| --- | --- |
+| `来源...` | 一个或多个文件路径、文件夹路径或 URL。支持类型见下方“支持的来源”。 |
+| `--vault 路径` | Obsidian vault 根目录；默认当前工作目录。输出目录必须位于 vault 内。 |
+| `--dest 目录` | vault 内的 Markdown 输出目录；默认 `00_Inbox/Imports`。 |
+| `--recursive` / `--no-recursive` | 是否递归处理文件夹；默认开启。 |
+| `--overwrite` | 覆盖同名笔记。默认关闭，自动在文件名后添加编号以保留已有笔记。 |
+| `--json` | 输出每个来源的状态、输出路径或错误信息，供脚本读取。 |
+| `--hooks-config 文件` | 指定 Hook 多行文本文件或插件 `data.json`；默认读取 vault 插件设置中的 `hooksText`。 |
+
+一次可以混合传入多个本地路径和 URL。URL 需要当前网络可以访问；文件夹按递归设置处理。全部来源成功时退出码为 `0`，至少一项失败时为 `1`，命令参数错误时为 `2`。CLI 通过子进程调用转换桥接脚本，转换依赖必须安装在当前 CLI Python 中；使用 vault 环境时，macOS/Linux 的可执行文件是 `$VAULT/.venv/bin/python`，Windows 是 `$VAULT/.venv/Scripts/python.exe`。
+
+`env check` 检查 vault `.venv` 中的 Python 版本、MarkItDown、音频和 YouTube 依赖。`env install` 会创建或更新 `$VAULT/.venv`，安装插件依赖，并将该 Python 路径写入插件设置；安装前需确保目标目录是 Obsidian vault（包含 `.obsidian`）。可用 `--python python3.12` 指定创建环境的 Python，或用 `--index-url URL` 为本次 pip 安装指定软件源。此命令只写 vault 内环境和插件设置，不修改全局 pip 配置。
+
+| 环境命令 | 参数 | 作用 |
+| --- | --- | --- |
+| `env check` | `--vault 路径` | 检查该 vault 的 `.venv`；默认 vault 是当前工作目录。 |
+| `env check` | `--python 路径` | 检查指定 Python 可执行文件，默认 `$VAULT/.venv/bin/python`（Windows 为 `Scripts/python.exe`）。 |
+| `env check` | `--json` | 返回包含 Python 版本、依赖状态和 `ready` 的 JSON。缺少必需项目时退出码为 `1`。 |
+| `env install` | `--vault 路径` | 创建或更新 `$VAULT/.venv`；目标必须已包含 `.obsidian`。 |
+| `env install` | `--python 命令或路径` | 指定创建虚拟环境的 Python，要求 3.10 或更新版本；省略时自动查找。 |
+| `env install` | `--index-url URL` | 仅为这次 pip 升级和依赖安装指定软件源，不改全局 pip 配置。 |
+
+安装包含 `markitdown[all]`、`imageio-ffmpeg`、`youtube-transcript-api` 和 `yt-dlp`；非 macOS 还会安装 `pytesseract`。`pytesseract` 不包含系统 Tesseract 程序；macOS 图片 OCR 使用 Apple Vision。命令成功后只更新插件 `data.json` 中的 `pythonPath`，会保留 Hook 和其他设置。环境安装成功退出码为 `0`，找不到 Python 或安装失败为 `1`，目标不是 vault 为 `2`。
+
+```bash
+python3 cli.py env check --vault "$VAULT" --json
+python3 cli.py env install --vault "$VAULT" --python /opt/homebrew/bin/python3.12
+python3 cli.py env install --vault "$VAULT" --index-url https://pypi.org/simple
+```
+
 `--json` 输出可供脚本处理的结构化结果；有任一来源转换失败时，命令返回非零退出码。
+
+CLI 与 Obsidian 插件共用 Hook 配置。默认读取 `$VAULT/.obsidian/plugins/markitdown-importer/data.json` 中的多行 `hooksText`；也可以用 `--hooks-config` 指定独立 Hook 文本文件。Hook 是本机脚本扩展点，命令以当前用户权限执行，请只配置自己信任的脚本。
 
 The repository includes `cli.py` to run the plugin's conversion features from a terminal. Use a Python interpreter where the project dependencies are installed. If they are installed in the vault's `.venv`, on macOS/Linux run:
 
@@ -63,12 +103,52 @@ The repository includes `cli.py` to run the plugin's conversion features from a 
 The CLI accepts files, folders, web page URLs, YouTube URLs, and Bilibili URLs. The current directory is the default vault, `00_Inbox/Imports` is the default destination, and folders are processed recursively by default. Existing notes are preserved by creating numbered copies.
 
 ```bash
+VAULT="/path/to/your/Obsidian vault"
+
 python3 cli.py --help
+python3 cli.py env --help
+python3 cli.py env check --vault "$VAULT"
+python3 cli.py env install --vault "$VAULT"
 python3 cli.py document.pdf --vault /path/to/vault --json
 python3 cli.py ./documents --vault /path/to/vault --no-recursive --overwrite
 ```
 
+### Conversion command options
+
+| Option | Description |
+| --- | --- |
+| `SOURCE...` | One or more file paths, folder paths, or URLs. See “Supported Sources” below. |
+| `--vault PATH` | Obsidian vault root; defaults to the current directory. The output directory must stay inside the vault. |
+| `--dest DIR` | Markdown output directory inside the vault; defaults to `00_Inbox/Imports`. |
+| `--recursive` / `--no-recursive` | Recursively process folders; enabled by default. |
+| `--overwrite` | Replace a same-name note. By default, numbered names are created to preserve existing notes. |
+| `--json` | Print per-source status, output path, or error as machine-readable JSON. |
+| `--hooks-config FILE` | Use a Hook text file or plugin `data.json`; defaults to `hooksText` in the vault plugin settings. |
+
+Local paths and URLs can be mixed in one invocation. URLs require network access. Folder handling follows the recursive option. Exit code `0` means all sources converted, `1` means at least one failed, and `2` means invalid command-line arguments. The CLI invokes the converter bridge in a subprocess, so its Python interpreter must have the conversion dependencies installed. For the vault environment, use `$VAULT/.venv/bin/python` on macOS/Linux or `$VAULT/.venv/Scripts/python.exe` on Windows.
+
+`env check` inspects the Python version and MarkItDown, audio, and YouTube dependencies in the vault's `.venv`. `env install` creates or updates `$VAULT/.venv`, installs the plugin dependencies, and writes its Python path to the plugin settings. The target must be an Obsidian vault containing `.obsidian`. Use `--python python3.12` to select the Python used to create the environment, or `--index-url URL` to choose a package index for this pip run. The command only changes the vault environment and plugin settings; it does not change global pip configuration.
+
+| Environment command | Option | Description |
+| --- | --- | --- |
+| `env check` | `--vault PATH` | Check the vault's `.venv`; defaults to the current directory. |
+| `env check` | `--python PATH` | Check a specific Python executable. Defaults to `$VAULT/.venv/bin/python` (`Scripts/python.exe` on Windows). |
+| `env check` | `--json` | Return Python version, dependency states, and `ready` as JSON. Missing required items produce exit code `1`. |
+| `env install` | `--vault PATH` | Create or update `$VAULT/.venv`; the directory must contain `.obsidian`. |
+| `env install` | `--python COMMAND_OR_PATH` | Choose the Python used to create the venv; requires Python 3.10+. Automatically discovered if omitted. |
+| `env install` | `--index-url URL` | Select the package index for this pip upgrade and install only; global pip config is unchanged. |
+
+Installation includes `markitdown[all]`, `imageio-ffmpeg`, `youtube-transcript-api`, and `yt-dlp`; non-macOS systems also install `pytesseract`. `pytesseract` does not install the system Tesseract executable; macOS image OCR uses Apple Vision. On success, only `pythonPath` is updated in the plugin `data.json`, preserving Hooks and other settings. Exit code `0` means setup succeeded, `1` means Python discovery or installation failed, and `2` means the target is not a vault.
+
+```bash
+python3 cli.py env check --vault "$VAULT" --json
+python3 cli.py env install --vault "$VAULT" --python /opt/homebrew/bin/python3.12
+python3 cli.py env install --vault "$VAULT" --index-url https://pypi.org/simple
+```
+
 `--json` prints structured results for scripts. The command exits with a non-zero status if any source fails to convert.
+
+The CLI and Obsidian plugin share the same hooks. By default, hooks are read from the `hooksText` field in `$VAULT/.obsidian/plugins/markitdown-importer/data.json`. Use `--hooks-config` to provide a standalone Hook text file. Hooks execute local commands with the current user's permissions, so only configure scripts you trust.
 
 ## 支持的来源 / Supported Sources
 
@@ -133,6 +213,7 @@ python3 cli.py ./documents --vault /path/to/vault --no-recursive --overwrite
 - `拖到编辑器时插入链接`：把来源拖到编辑器中时，转换后插入 wiki 链接。
 - `导入后打开第一篇笔记`：转换完成后打开第一篇导入笔记。
 - `覆盖同名笔记`：覆盖已有同名笔记；关闭时会自动生成带编号的副本。
+- `转换 Hook`：编辑并保存前置/后置脚本配置；插件和 CLI 共用。
 
 - `环境工具`: check Python, MarkItDown, bridge scripts, YouTube caption tools, OCR, and ffmpeg; create/update `.venv`; optionally install ffmpeg into the vault Python environment.
 - `Python 路径`: Python used to run the bridge.
@@ -141,3 +222,20 @@ python3 cli.py ./documents --vault /path/to/vault --no-recursive --overwrite
 - `拖到编辑器时插入链接`: convert editor drops and insert wiki links.
 - `导入后打开第一篇笔记`: open the first imported note after conversion.
 - `覆盖同名笔记`: overwrite existing notes instead of creating numbered copies.
+- `转换 Hook`: edit and save pre-conversion and post-conversion hooks shared by the plugin and CLI.
+
+### 转换 Hook / Conversion Hooks
+
+Hook 配置使用多行文本，每个非注释行定义一个 Hook，按行顺序执行。`before` 接收文件的临时副本，适合按扩展名做源文件清洗；`after` 接收 MarkItDown 生成的 Markdown，适合整理标签、frontmatter 或正文。前置 Hook 只作用于本地文件；URL 来源可使用后置 Hook。脚本可以原位修改 `{input}`，也可以写入 `{output}`。原始文件不会被前置 Hook 改写。Hook 出错或超时会让当前来源导入失败。
+
+配置 Hook 后，未列在内置格式表中的扩展名也可以通过插件和 CLI 导入；扩展名或 MIME 选择器需匹配相应 Hook，随后仍由 MarkItDown 负责实际转换。递归导入也会纳入这些已配置的扩展名。
+
+```text
+# 阶段 | 来源类型 | 扩展名/MIME | 命令 参数…
+before | file | .html,.htm,mime:text/html | "/path/to/python" "/path/to/normalize_html.py" --input {input} --output {output}
+after | * | * | "/path/to/python" "/path/to/postprocess.py" {input} {output}
+```
+
+四列以 `|` 分隔。阶段为 `before` 或 `after`；来源类型可用 `file`、`web`、`youtube`、`bilibili`，`*` 表示全部类型。选择器可写扩展名（如 `.html`）、MIME（如 `mime:text/*`）或 `*`；多个选择器/来源类型以逗号分隔。扩展名忽略大小写；同一行同时指定扩展名和 MIME 时需要同时匹配。命令使用常见引号规则拆分参数，不经过 shell；路径包含空格时加引号。
+
+可用占位符：`{input}`、`{output}`、`{source}`、`{source_type}`、`{extension}`、`{mime_type}`、`{phase}`。这些值也会通过对应的 `MARKITDOWN_HOOK_*` 环境变量提供。

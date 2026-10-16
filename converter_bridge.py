@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
+import mimetypes
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1021,12 +1024,14 @@ def convert_zip(source: Path, ocr_script: Path) -> tuple[str, str]:
     return "\n\n---\n\n".join(sections), "zip recursive bridge"
 
 
-def iter_directory_files(directory: Path, recursive: bool) -> list[Path]:
+def iter_directory_files(
+    directory: Path, recursive: bool, hooks_config: dict[str, object]
+) -> list[Path]:
     iterator = directory.rglob("*") if recursive else directory.glob("*")
     return sorted(
         path
         for path in iterator
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+        if path.is_file() and is_supported_file(path, hooks_config)
     )
 
 
@@ -1036,41 +1041,360 @@ def convert_one(
     overwrite: bool,
     recursive: bool,
     ocr_script: Path,
+    hooks_config: dict[str, object],
 ) -> list[dict[str, object]]:
+    source_type = source_type_for(source)
     if is_url(source):
+        extension = extension_for_source(source)
+        mime_type = mime_type_for_source(source)
+        if matching_hooks(hooks_config, "before-convert", source_type, extension, mime_type):
+            raise ValueError("before-convert hooks require a local file; use sourceTypes [\"file\"] or an after-convert hook for URLs.")
         if is_youtube_url(source):
             markdown, converter, stem = convert_youtube_url(source)
-            output = write_note(source, markdown, output_dir, overwrite, converter, stem)
         elif is_bilibili_url(source):
             markdown, converter, stem = convert_bilibili_url(source)
-            output = write_note(source, markdown, output_dir, overwrite, converter, stem)
         else:
             markdown, converter = convert_content(source, ocr_script)
-            output = write_note(source, markdown, output_dir, overwrite, converter)
+            stem = None
+        with tempfile.TemporaryDirectory(prefix="markitdown-hooks-") as temp_dir:
+            markdown = run_after_hooks(
+                markdown, source, source_type, extension, mime_type, hooks_config, Path(temp_dir)
+            )
+        output = write_note(source, markdown, output_dir, overwrite, converter, stem)
         return [{"ok": True, "source": source, "output": str(output)}]
 
     path = Path(source).expanduser().resolve()
     if path.is_dir():
         results: list[dict[str, object]] = []
-        files = iter_directory_files(path, recursive)
+        files = iter_directory_files(path, recursive, hooks_config)
         if not files:
             return [{"ok": False, "source": str(path), "error": "No supported files found in this folder."}]
         for child in files:
-            results.extend(convert_one(str(child), output_dir, overwrite, recursive, ocr_script))
+            results.extend(convert_one(str(child), output_dir, overwrite, recursive, ocr_script, hooks_config))
         return results
 
     if not path.is_file():
         return [{"ok": False, "source": source, "error": "Source does not exist."}]
 
-    if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+    if not is_supported_file(path, hooks_config):
         return [{"ok": False, "source": str(path), "error": f"Unsupported file type: {path.suffix or 'none'}"}]
 
-    if path.suffix.lower() in ZIP_EXTENSIONS:
-        markdown, converter = convert_zip(path, ocr_script)
-    else:
-        markdown, converter = convert_content(path, ocr_script)
+    extension = path.suffix.lower()
+    mime_type = mime_type_for_source(path)
+    with tempfile.TemporaryDirectory(prefix="markitdown-hooks-") as temp_dir:
+        temp_path = Path(temp_dir)
+        staged_source = run_before_hooks(
+            path, source, source_type, extension, mime_type, hooks_config, temp_path
+        )
+        if staged_source.suffix.lower() in ZIP_EXTENSIONS:
+            markdown, converter = convert_zip(staged_source, ocr_script)
+        else:
+            markdown, converter = convert_content(staged_source, ocr_script)
+        markdown = run_after_hooks(
+            markdown, source, source_type, extension, mime_type, hooks_config, temp_path
+        )
     output = write_note(path, markdown, output_dir, overwrite, converter)
     return [{"ok": True, "source": str(path), "output": str(output)}]
+
+
+def source_type_for(source: str) -> str:
+    if not is_url(source):
+        return "file"
+    if is_youtube_url(source):
+        return "youtube"
+    if is_bilibili_url(source):
+        return "bilibili"
+    return "web"
+
+
+def is_supported_file(path: Path, hooks_config: dict[str, object]) -> bool:
+    if path.suffix.lower() in SUPPORTED_EXTENSIONS:
+        return True
+    extension = path.suffix.lower()
+    mime_type = mime_type_for_source(path)
+    return any(
+        matching_hooks(hooks_config, phase, "file", extension, mime_type)
+        for phase in ("before-convert", "after-convert")
+    )
+
+
+def extension_for_source(source: str | Path) -> str:
+    value = str(source)
+    if is_url(value):
+        value = urlparse(value).path
+    return Path(value).suffix.lower()
+
+
+def mime_type_for_source(source: str | Path) -> str:
+    value = str(source)
+    if is_url(value):
+        value = urlparse(value).path
+    mime_type, _encoding = mimetypes.guess_type(value, strict=False)
+    return mime_type or ""
+
+
+def matching_hooks(
+    hooks_config: dict[str, object], phase: str, source_type: str, extension: str, mime_type: str
+) -> list[dict[str, object]]:
+    hooks = hooks_config.get("hooks", [])
+    if not isinstance(hooks, list):
+        raise ValueError("Hook configuration 'hooks' must be an array.")
+
+    matched: list[dict[str, object]] = []
+    for index, hook in enumerate(hooks):
+        if not isinstance(hook, dict) or hook.get("enabled", True) is False:
+            continue
+        if hook.get("phase") != phase:
+            continue
+        source_types = hook.get("sourceTypes", [])
+        extensions = hook.get("extensions", [])
+        mime_types = hook.get("mimeTypes", [])
+        if not isinstance(source_types, list) or not all(isinstance(value, str) for value in source_types):
+            raise ValueError(f"Hook #{index + 1}: sourceTypes must be an array of strings.")
+        if not isinstance(extensions, list) or not all(isinstance(value, str) for value in extensions):
+            raise ValueError(f"Hook #{index + 1}: extensions must be an array of strings.")
+        if not isinstance(mime_types, list) or not all(isinstance(value, str) for value in mime_types):
+            raise ValueError(f"Hook #{index + 1}: mimeTypes must be an array of strings.")
+        if source_types and source_type not in source_types:
+            continue
+        normalized_extensions = {
+            "*" if value == "*" else (value.lower() if value.startswith(".") else f".{value.lower()}")
+            for value in extensions
+        }
+        if normalized_extensions and extension.lower() not in normalized_extensions and "*" not in normalized_extensions:
+            continue
+        normalized_mime_types = {value.lower() for value in mime_types}
+        if normalized_mime_types and not any(
+            fnmatch.fnmatchcase(mime_type.lower(), pattern) for pattern in normalized_mime_types
+        ):
+            continue
+        matched.append(hook)
+    return matched
+
+
+def hook_command(
+    hook: dict[str, object],
+    *,
+    phase: str,
+    source: str,
+    source_type: str,
+    extension: str,
+    mime_type: str,
+    input_path: Path,
+    output_path: Path,
+) -> Path:
+    hook_id = str(hook.get("id") or "unnamed")
+    command = hook.get("command")
+    args = hook.get("args", [])
+    if not isinstance(command, str) or not command.strip():
+        raise ValueError(f"Hook '{hook_id}': command must be a non-empty string.")
+    if not isinstance(args, list) or not all(isinstance(value, str) for value in args):
+        raise ValueError(f"Hook '{hook_id}': args must be an array of strings.")
+
+    values = {
+        "{input}": str(input_path),
+        "{output}": str(output_path),
+        "{source}": source,
+        "{source_type}": source_type,
+        "{extension}": extension,
+        "{mime_type}": mime_type,
+        "{phase}": phase,
+    }
+    command_line = [
+        command,
+        *(
+            _replace_hook_values(arg, values)
+            for arg in args
+        ),
+    ]
+    timeout = hook.get("timeoutSeconds", 120)
+    if not isinstance(timeout, (int, float)) or timeout <= 0 or timeout > 3600:
+        raise ValueError(f"Hook '{hook_id}': timeoutSeconds must be between 1 and 3600.")
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "MARKITDOWN_HOOK_PHASE": phase,
+            "MARKITDOWN_HOOK_SOURCE": source,
+            "MARKITDOWN_HOOK_SOURCE_TYPE": source_type,
+            "MARKITDOWN_HOOK_EXTENSION": extension,
+            "MARKITDOWN_HOOK_MIME_TYPE": mime_type,
+            "MARKITDOWN_HOOK_INPUT_PATH": str(input_path),
+            "MARKITDOWN_HOOK_OUTPUT_PATH": str(output_path),
+        }
+    )
+    try:
+        completed = subprocess.run(
+            command_line,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=float(timeout),
+            check=False,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Hook '{hook_id}' timed out after {timeout} seconds.") from exc
+    except OSError as exc:
+        raise RuntimeError(f"Hook '{hook_id}' could not start: {exc}") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()[:3000]
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Hook '{hook_id}' failed with exit code {completed.returncode}{suffix}")
+    if output_path.is_file():
+        return output_path
+    if input_path.is_file():
+        return input_path
+    raise RuntimeError(f"Hook '{hook_id}' removed its input and did not create its output file.")
+
+
+def run_before_hooks(
+    source_path: Path,
+    source: str,
+    source_type: str,
+    extension: str,
+    mime_type: str,
+    hooks_config: dict[str, object],
+    temp_dir: Path,
+) -> Path:
+    hooks = matching_hooks(hooks_config, "before-convert", source_type, extension, mime_type)
+    if not hooks:
+        return source_path
+    current_path = temp_dir / f"before-000{source_path.suffix}"
+    shutil.copy2(source_path, current_path)
+    for index, hook in enumerate(hooks, start=1):
+        output_path = temp_dir / f"before-{index:03d}{source_path.suffix}"
+        current_path = hook_command(
+            hook,
+            phase="before-convert",
+            source=source,
+            source_type=source_type,
+            extension=extension,
+            mime_type=mime_type,
+            input_path=current_path,
+            output_path=output_path,
+        )
+    return current_path
+
+
+def run_after_hooks(
+    markdown: str,
+    source: str,
+    source_type: str,
+    extension: str,
+    mime_type: str,
+    hooks_config: dict[str, object],
+    temp_dir: Path,
+) -> str:
+    hooks = matching_hooks(hooks_config, "after-convert", source_type, extension, mime_type)
+    if not hooks:
+        return markdown
+    current_path = temp_dir / "after-000.md"
+    current_path.write_text(markdown, encoding="utf-8")
+    for index, hook in enumerate(hooks, start=1):
+        output_path = temp_dir / f"after-{index:03d}.md"
+        current_path = hook_command(
+            hook,
+            phase="after-convert",
+            source=source,
+            source_type=source_type,
+            extension=extension,
+            mime_type=mime_type,
+            input_path=current_path,
+            output_path=output_path,
+        )
+    return current_path.read_text(encoding="utf-8")
+
+
+def load_hooks_config(config_path: Path | None, vault: Path) -> dict[str, object]:
+    if config_path is None:
+        config_path = vault / ".obsidian" / "plugins" / "markitdown-importer" / "data.json"
+    config_path = config_path.expanduser()
+    if not config_path.is_file():
+        return {"hooks": []}
+    try:
+        contents = config_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Could not read hook configuration {config_path}: {exc}") from exc
+    try:
+        payload = json.loads(contents)
+    except json.JSONDecodeError:
+        return {"hooks": parse_hooks_text(contents)}
+    if not isinstance(payload, dict):
+        raise ValueError("Plugin data file must contain a JSON object or a standalone Hook text file.")
+    hooks_text = payload.get("hooksText", "")
+    if not isinstance(hooks_text, str):
+        raise ValueError("Plugin setting 'hooksText' must be a string.")
+    return {"hooks": parse_hooks_text(hooks_text)}
+
+
+def parse_hooks_text(text: str) -> list[dict[str, object]]:
+    hooks: list[dict[str, object]] = []
+    supported_source_types = {"file", "web", "youtube", "bilibili"}
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [part.strip() for part in line.split("|", 3)]
+        if len(parts) != 4:
+            raise ValueError(f"Hook line {line_number}: expected 'phase | source types | selectors | command'.")
+        phase_text, source_text, selector_text, command_text = parts
+        phases = {"before": "before-convert", "after": "after-convert"}
+        if phase_text not in phases:
+            raise ValueError(f"Hook line {line_number}: phase must be 'before' or 'after'.")
+        if not source_text:
+            raise ValueError(f"Hook line {line_number}: source type is empty; use '*' for all types.")
+
+        source_types = [] if source_text == "*" else [value.strip() for value in source_text.split(",") if value.strip()]
+        unknown_source_types = set(source_types) - supported_source_types
+        if unknown_source_types:
+            raise ValueError(
+                f"Hook line {line_number}: unsupported source type(s): {', '.join(sorted(unknown_source_types))}."
+            )
+
+        extensions: list[str] = []
+        mime_types: list[str] = []
+        selectors = [value.strip() for value in selector_text.split(",") if value.strip()]
+        if not selectors:
+            raise ValueError(f"Hook line {line_number}: specify an extension, MIME type, or '*'.")
+        for selector in selectors:
+            if selector.startswith("mime:"):
+                mime_type = selector[5:].strip()
+                if not mime_type:
+                    raise ValueError(f"Hook line {line_number}: MIME selector is empty.")
+                mime_types.append(mime_type)
+            else:
+                extensions.append(selector)
+
+        lexer = shlex.shlex(command_text, posix=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        lexer.escape = "" if os.name == "nt" else "\\"
+        try:
+            command_parts = list(lexer)
+        except ValueError as exc:
+            raise ValueError(f"Hook line {line_number}: invalid command quoting: {exc}") from exc
+        if not command_parts:
+            raise ValueError(f"Hook line {line_number}: command is empty.")
+        hooks.append(
+            {
+                "id": f"line-{line_number}",
+                "phase": phases[phase_text],
+                "sourceTypes": source_types,
+                "extensions": extensions,
+                "mimeTypes": mime_types,
+                "command": command_parts[0],
+                "args": command_parts[1:],
+            }
+        )
+    return hooks
+
+
+def _replace_hook_values(value: str, replacements: dict[str, str]) -> str:
+    for placeholder, replacement in replacements.items():
+        value = value.replace(placeholder, replacement)
+    return value
 
 
 def parse_args() -> argparse.Namespace:
@@ -1081,6 +1405,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--recursive", action="store_true")
     parser.add_argument("--ocr-script", type=Path, required=True)
+    parser.add_argument("--hooks-config", type=Path, default=None, help="Plugin data.json or hook configuration file.")
     parser.add_argument("--result-file", type=Path, default=None)
     return parser.parse_args()
 
@@ -1105,6 +1430,7 @@ def main() -> int:
     results: list[dict[str, object]] = []
 
     try:
+        hooks_config = load_hooks_config(args.hooks_config, vault)
         assert_inside_vault(output_dir, vault)
         output_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:
@@ -1120,6 +1446,7 @@ def main() -> int:
                     args.overwrite,
                     args.recursive,
                     args.ocr_script.expanduser().resolve(),
+                    hooks_config,
                 )
             )
         except Exception as exc:
